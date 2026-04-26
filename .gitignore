@@ -1,0 +1,43 @@
+*.js
+!jest.config.js
+*.d.ts
+node_modules
+
+# CDK asset staging directory
+.cdk.staging
+cdk.out
+
+# --- Secretos / credenciales ---
+*.csv
+*accessKeys*
+*credentials*
+.env
+.env.*
+.aws-educate.env
+
+# --- Extras ---
+*.log
+.DS_Store
+.vscode/
+.idea/
+dist/
+*.tsbuildinfo
+
+# --- Todos los archivos y carpetas ocultos por defecto ---
+.*
+# Excepciones (sí versionar):
+!/.gitignore
+!/.npmignore
+!/.gitattributes
+!/.github/
+!/.github/**
+!/.eslintrc*
+!/.prettierrc*
+!/.prettierignore
+!/.editorconfig
+!/.nvmrc
+!/.dockerignore
+!/.husky/
+!/.husky/**
+!**/.gitkeep
+
