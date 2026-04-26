@@ -1,0 +1,176 @@
+{
+  "info": {
+    "_postman_id": "6e44b9db-9f82-4c73-ae7d-95b7e0b3c1e8",
+    "name": "YapePay MVP",
+    "description": "Coleccion minima para validar el HTTP API MVP de YapePay despues del deploy. No contiene secretos.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://replace-me.execute-api.us-east-1.amazonaws.com",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "POST /v1/qr - valido",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": 120.5,\n  \"currency\": \"PEN\",\n  \"description\": \"Pago MVP YapePay\",\n  \"ttlMinutes\": 45\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/v1/qr",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "qr"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 201', function () {",
+              "  pm.response.to.have.status(201);",
+              "});",
+              "",
+              "pm.test('response has qrCode', function () {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body).to.have.property('qrCode');",
+              "  pm.expect(body.qrCode).to.include({",
+              "    amount: 120.5,",
+              "    currency: 'PEN',",
+              "    description: 'Pago MVP YapePay',",
+              "    used: false",
+              "  });",
+              "  pm.expect(body.qrCode.qrId).to.be.a('string');",
+              "  pm.expect(body.qrCode.qrData).to.eql(`yapepay://qr/${body.qrCode.qrId}`);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /v1/qr - abierto",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/v1/qr",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "qr"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 201', function () {",
+              "  pm.response.to.have.status(201);",
+              "});",
+              "",
+              "pm.test('response has open qrCode', function () {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body).to.have.property('qrCode');",
+              "  pm.expect(body.qrCode).to.include({ used: false });",
+              "  pm.expect(body.qrCode).to.not.have.property('amount');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "POST /v1/qr - validacion fallida",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"amount\": -1,\n  \"currency\": \"pen\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{baseUrl}}/v1/qr",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "v1",
+            "qr"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status 400', function () {",
+              "  pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test('validation error shape', function () {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.error).to.eql('ValidationException');",
+              "  pm.expect(body.message).to.eql('El payload de generación de QR no es válido.');",
+              "  pm.expect(body.details).to.be.an('array');",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
