@@ -29,14 +29,14 @@ export class ServerlessStack extends cdk.Stack {
     const qrHandler = new lambda.Function(this, 'QrHandlerFunction', {
       architecture: lambda.Architecture.ARM_64,
       code: lambda.Code.fromAsset('lambda/qr-handler', {
-        exclude: ['*.d.ts', '*.mjs', '*.ts', '.gitkeep'],
+        exclude: ['*.d.ts', '*.ts', 'index.mjs', '.gitkeep'],
       }),
       environment: {
         ENV_NAME: props.config.envName,
         PROJECT_NAME: props.config.projectName,
       },
       functionName: this.buildFunctionName(props.config, 'qr-handler'),
-      handler: 'index.handler',
+      handler: 'lambda.handler',
       logGroup: this.createLogGroup(
         'QrHandlerLogGroup',
         this.buildFunctionName(props.config, 'qr-handler'),
@@ -52,7 +52,7 @@ export class ServerlessStack extends cdk.Stack {
     const notificationHandler = new lambda.Function(this, 'NotificationHandlerFunction', {
       architecture: lambda.Architecture.ARM_64,
       code: lambda.Code.fromAsset('lambda/notification-handler', {
-        exclude: ['*.d.ts', '*.mjs', '*.ts', '.gitkeep'],
+        exclude: ['*.d.ts', '*.ts', 'index.mjs', '.gitkeep'],
       }),
       environment: {
         ENV_NAME: props.config.envName,
@@ -60,7 +60,7 @@ export class ServerlessStack extends cdk.Stack {
         PROJECT_NAME: props.config.projectName,
       },
       functionName: this.buildFunctionName(props.config, 'notification-handler'),
-      handler: 'index.handler',
+      handler: 'lambda.handler',
       logGroup: this.createLogGroup(
         'NotificationHandlerLogGroup',
         this.buildFunctionName(props.config, 'notification-handler'),

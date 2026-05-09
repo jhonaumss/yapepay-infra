@@ -1,15 +1,53 @@
 import * as cdk from 'aws-cdk-lib';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import { Construct } from 'constructs';
 
-/**
- * NetworkStack — placeholder.
- *
- * Plan / yape-parte1 §5.1: VPC Multi-AZ con subnets pública / privada /
- * aislada. Evitar NAT Gateway en dev mientras no sea estrictamente necesario.
- */
+import { EnvironmentConfig } from '../config/environment.js';
+
+interface NetworkStackProps extends cdk.StackProps {
+  config: EnvironmentConfig;
+}
+
 export class NetworkStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+  readonly vpc: ec2.Vpc;
+
+  constructor(scope: Construct, id: string, props: NetworkStackProps) {
     super(scope, id, props);
-    // TODO: Implementar VPC Multi-AZ.
+    const { config } = props;
+    const prefix = `${config.projectName}-${config.envName}`;
+
+    // Dev: public subnets only (no NAT Gateway cost).
+    // When enableCostlyResources is true, adds private subnets + 1 NAT Gateway.
+    this.vpc = new ec2.Vpc(this, 'Vpc', {
+      vpcName: `${prefix}-vpc`,
+      maxAzs: 2,
+      natGateways: config.features.enableCostlyResources ? 1 : 0,
+      subnetConfiguration: [
+        {
+          name: 'public',
+          subnetType: ec2.SubnetType.PUBLIC,
+          cidrMask: 24,
+        },
+        ...(config.features.enableCostlyResources
+          ? [
+              {
+                name: 'private',
+                subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+                cidrMask: 24,
+              },
+            ]
+          : []),
+      ],
+    });
+
+    new cdk.CfnOutput(this, 'VpcId', {
+      value: this.vpc.vpcId,
+      exportName: `${prefix}-vpc-id`,
+    });
+
+    new cdk.CfnOutput(this, 'PublicSubnetIds', {
+      value: this.vpc.publicSubnets.map((s: ec2.ISubnet) => s.subnetId).join(','),
+      exportName: `${prefix}-public-subnet-ids`,
+    });
   }
 }
