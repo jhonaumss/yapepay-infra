@@ -2,22 +2,35 @@ import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
+import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import * as elbv2targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 
 import { EnvironmentConfig } from '../config/environment.js';
 
 // Microservices deployed as ECS Fargate containers.
-// qr-service and notification-service run as Lambdas (see ServerlessStack).
+// qr-service runs as a Lambda behind the same ALB.
+// notification-service is a pure SQS consumer — no HTTP interface.
 const FARGATE_SERVICES = ['user', 'wallet', 'transaction'] as const;
 export type FargateServiceName = (typeof FARGATE_SERVICES)[number];
 
 const CONTAINER_PORT = 3000;
 
+// Path-based routing rules on the shared ALB listener.
+// wallet handles two distinct prefixes; priority must be unique per listener.
+const SERVICE_ROUTES: Record<FargateServiceName, { paths: string[]; priority: number }> = {
+  user:        { paths: ['/v1/usuarios*'],                    priority: 10 },
+  wallet:      { paths: ['/v1/billeteras*', '/v1/recargas*'], priority: 20 },
+  transaction: { paths: ['/v1/transacciones*'],               priority: 30 },
+};
+
 interface ServicesStackProps extends cdk.StackProps {
   config: EnvironmentConfig;
   vpc: ec2.IVpc;
+  qrHandlerFunction: lambda.IFunction;
 }
 
 export class ServicesStack extends cdk.Stack {
@@ -25,6 +38,7 @@ export class ServicesStack extends cdk.Stack {
   readonly repositories: Record<FargateServiceName, ecr.Repository>;
   readonly taskExecutionRole: iam.Role;
   readonly fargateServices: Record<FargateServiceName, ecs.FargateService>;
+  readonly alb: elbv2.ApplicationLoadBalancer;
 
   constructor(scope: Construct, id: string, props: ServicesStackProps) {
     super(scope, id, props);
@@ -47,15 +61,51 @@ export class ServicesStack extends cdk.Stack {
       ],
     });
 
-    // Shared security group for all Fargate tasks.
-    // Dev uses public subnets (no NAT Gateway), so tasks need a public IP.
+    // ALB: accepts public HTTP traffic
+    const albSg = new ec2.SecurityGroup(this, 'AlbSg', {
+      vpc: props.vpc,
+      description: `${prefix} ALB`,
+      allowAllOutbound: true,
+    });
+    albSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80));
+
+    // Tasks: only accept traffic from the ALB, not directly from the internet
     const taskSg = new ec2.SecurityGroup(this, 'TaskSg', {
       vpc: props.vpc,
       description: `${prefix} Fargate tasks`,
       allowAllOutbound: true,
     });
-    taskSg.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(CONTAINER_PORT));
+    taskSg.addIngressRule(albSg, ec2.Port.tcp(CONTAINER_PORT));
 
+    this.alb = new elbv2.ApplicationLoadBalancer(this, 'Alb', {
+      loadBalancerName: `${prefix}-alb`,
+      vpc: props.vpc,
+      internetFacing: true,
+      securityGroup: albSg,
+      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+    });
+
+    // Single HTTP listener; default action returns 404 for unmatched paths
+    const listener = this.alb.addListener('HttpListener', {
+      port: 80,
+      defaultAction: elbv2.ListenerAction.fixedResponse(404, {
+        contentType: 'application/json',
+        messageBody: '{"error":"route not found"}',
+      }),
+    });
+
+    // qr-service: Lambda target — CDK grants ALB permission to invoke it
+    listener.addTargets('QrTargets', {
+      targets: [new elbv2targets.LambdaTarget(props.qrHandlerFunction)],
+      priority: 40,
+      conditions: [elbv2.ListenerCondition.pathPatterns(['/v1/qr*'])],
+      healthCheck: {
+        enabled: true,
+        healthyHttpCodes: '200-499',
+      },
+    });
+
+    // ECR repositories
     const repoEntries = FARGATE_SERVICES.map(svc => {
       const repo = new ecr.Repository(this, `${svc}-repo`, {
         repositoryName: `${prefix}-${svc}-service`,
@@ -80,8 +130,10 @@ export class ServicesStack extends cdk.Stack {
       ecr.Repository
     >;
 
+    // Fargate task definitions, services, and ALB target groups
     const serviceEntries = FARGATE_SERVICES.map(svc => {
       const repo = this.repositories[svc];
+      const { paths, priority } = SERVICE_ROUTES[svc];
 
       const taskDef = new ecs.FargateTaskDefinition(this, `${svc}-task`, {
         family: `${prefix}-${svc}`,
@@ -91,8 +143,8 @@ export class ServicesStack extends cdk.Stack {
       });
 
       taskDef.addContainer(`${svc}-container`, {
-        // Points to :latest so CD pipeline's --force-new-deployment picks up
-        // each newly pushed image without needing a task definition update.
+        // :latest tag — CD pipeline pushes here then calls update-service
+        // --force-new-deployment to pick up the new image automatically.
         image: ecs.ContainerImage.fromEcrRepository(repo, 'latest'),
         portMappings: [{ containerPort: CONTAINER_PORT }],
         logging: ecs.LogDrivers.awsLogs({
@@ -105,9 +157,8 @@ export class ServicesStack extends cdk.Stack {
         },
       });
 
-      // desiredCount: 0 on initial CDK deploy so CloudFormation succeeds
-      // even before the first image is pushed to ECR.
-      // The CD pipeline sets --desired-count 1 on every deploy.
+      // desiredCount: 0 so the initial CDK deploy succeeds before any image
+      // exists in ECR. The CD pipeline sets --desired-count 1 on first push.
       const service = new ecs.FargateService(this, `${svc}-svc`, {
         cluster: this.cluster,
         taskDefinition: taskDef,
@@ -118,6 +169,28 @@ export class ServicesStack extends cdk.Stack {
         vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
         deploymentController: { type: ecs.DeploymentControllerType.ECS },
         circuitBreaker: { enable: true, rollback: false },
+      });
+
+      // Wire the service into the ALB listener with path-based routing
+      listener.addTargets(`${svc}Targets`, {
+        port: CONTAINER_PORT,
+        protocol: elbv2.ApplicationProtocol.HTTP,
+        targets: [
+          service.loadBalancerTarget({
+            containerName: `${svc}-container`,
+            containerPort: CONTAINER_PORT,
+          }),
+        ],
+        priority,
+        conditions: [elbv2.ListenerCondition.pathPatterns(paths)],
+        healthCheck: {
+          path: '/',
+          healthyHttpCodes: '200-499',
+          interval: cdk.Duration.seconds(30),
+          timeout: cdk.Duration.seconds(10),
+          healthyThresholdCount: 2,
+          unhealthyThresholdCount: 3,
+        },
       });
 
       return [svc, service] as const;
@@ -136,6 +209,12 @@ export class ServicesStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'TaskExecutionRoleArn', {
       value: this.taskExecutionRole.roleArn,
       exportName: `${prefix}-task-exec-role-arn`,
+    });
+
+    new cdk.CfnOutput(this, 'AlbDnsName', {
+      value: this.alb.loadBalancerDnsName,
+      exportName: `${prefix}-alb-dns`,
+      description: 'Base URL for all services (Fargate + Lambda via ALB)',
     });
   }
 }

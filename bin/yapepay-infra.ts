@@ -75,11 +75,12 @@ new ObservabilityStack(app, 'YapepayDevObservabilityStack', {
   transactionEventsQueue: messagingStack.transactionEventsQueue,
 });
 
-// ── Container Services (ECS Fargate) ─────────────────────────────────────────
+// ── Container Services (ECS Fargate + Lambda via ALB) ────────────────────────
 new ServicesStack(app, 'YapepayDevServicesStack', {
   config: devConfig,
   env,
   vpc: networkStack.vpc,
+  qrHandlerFunction: serverlessStack.qrHandlerFunction,
 });
 
 app.synth();
