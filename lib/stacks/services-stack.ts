@@ -43,7 +43,6 @@ interface ServicesStackProps extends cdk.StackProps {
   userPool: cognito.IUserPool;
   userPoolClientId: string;
   dbSecret: secretsmanager.ISecret;
-  dbSecurityGroup: ec2.SecurityGroup;
   dbEndpoint: string;
   dbPort: string;
 }
@@ -105,9 +104,6 @@ export class ServicesStack extends cdk.Stack {
       allowAllOutbound: true,
     });
     taskSg.addIngressRule(albSg, ec2.Port.tcp(CONTAINER_PORT));
-
-    // Allow tasks to reach RDS on port 5432
-    props.dbSecurityGroup.addIngressRule(taskSg, ec2.Port.tcp(5432));
 
     // Execution role must be able to pull the DB secret at task startup
     props.dbSecret.grantRead(this.taskExecutionRole);

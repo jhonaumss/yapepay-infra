@@ -99,7 +99,6 @@ new ServicesStack(app, 'YapepayDevServicesStack', {
   userPool: authStack.userPool,
   userPoolClientId: authStack.userPoolClient.userPoolClientId,
   dbSecret: databaseStack.dbSecret,
-  dbSecurityGroup: databaseStack.dbSecurityGroup,
   dbEndpoint: databaseStack.dbEndpoint,
   dbPort: databaseStack.dbPort,
 });
