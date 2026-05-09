@@ -3,6 +3,8 @@ import * as cdk from 'aws-cdk-lib';
 
 import { devConfig } from '../lib/config/dev.js';
 import { ApiStack } from '../lib/stacks/api-stack.js';
+import { AuthStack } from '../lib/stacks/auth-stack.js';
+import { DatabaseStack } from '../lib/stacks/database-stack.js';
 import { MessagingStack } from '../lib/stacks/messaging-stack.js';
 import { NetworkStack } from '../lib/stacks/network-stack.js';
 import { ObservabilityStack } from '../lib/stacks/observability-stack.js';
@@ -21,6 +23,12 @@ const env: cdk.Environment = {
 for (const [key, value] of Object.entries(devConfig.tags)) {
   cdk.Tags.of(app).add(key, value);
 }
+
+// ── Auth (Cognito) ────────────────────────────────────────────────────────────
+const authStack = new AuthStack(app, 'YapepayDevAuthStack', {
+  config: devConfig,
+  env,
+});
 
 // ── Networking ───────────────────────────────────────────────────────────────
 const networkStack = new NetworkStack(app, 'YapepayDevNetworkStack', {
@@ -75,12 +83,25 @@ new ObservabilityStack(app, 'YapepayDevObservabilityStack', {
   transactionEventsQueue: messagingStack.transactionEventsQueue,
 });
 
+// ── Database (RDS PostgreSQL) ─────────────────────────────────────────────────
+const databaseStack = new DatabaseStack(app, 'YapepayDevDatabaseStack', {
+  config: devConfig,
+  env,
+  vpc: networkStack.vpc,
+});
+
 // ── Container Services (ECS Fargate + Lambda via ALB) ────────────────────────
 new ServicesStack(app, 'YapepayDevServicesStack', {
   config: devConfig,
   env,
   vpc: networkStack.vpc,
   qrHandlerFunction: serverlessStack.qrHandlerFunction,
+  userPool: authStack.userPool,
+  userPoolClientId: authStack.userPoolClient.userPoolClientId,
+  dbSecret: databaseStack.dbSecret,
+  dbSecurityGroup: databaseStack.dbSecurityGroup,
+  dbEndpoint: databaseStack.dbEndpoint,
+  dbPort: databaseStack.dbPort,
 });
 
 app.synth();
