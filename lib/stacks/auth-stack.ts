@@ -23,7 +23,7 @@ export class AuthStack extends cdk.Stack {
       signInAliases: { email: true },
       autoVerify: { email: true },
       passwordPolicy: {
-        minLength: 4,
+        minLength: 6,
         requireLowercase: false,
         requireUppercase: false,
         requireDigits: false,
