@@ -238,7 +238,7 @@ test('ServerlessStack sintetiza Lambdas MVP con configuración básica', () => {
   template.resourceCountIs('AWS::Lambda::Function', 2);
   template.allResourcesProperties('AWS::Lambda::Function', {
     Architectures: ['arm64'],
-    Handler: 'index.handler',
+    Handler: 'lambda.handler',
     MemorySize: 128,
     Runtime: 'nodejs22.x',
   });
