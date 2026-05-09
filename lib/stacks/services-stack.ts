@@ -1,4 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
+import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
@@ -7,6 +8,7 @@ import * as elbv2targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 
 import { EnvironmentConfig } from '../config/environment.js';
@@ -27,10 +29,23 @@ const SERVICE_ROUTES: Record<FargateServiceName, { paths: string[]; priority: nu
   transaction: { paths: ['/v1/transacciones*'],               priority: 30 },
 };
 
+// Each service connects to its own logical database on the shared RDS instance
+const SERVICE_DB_NAMES: Record<FargateServiceName, string> = {
+  user:        'yapepay_users',
+  wallet:      'yapepay_wallets',
+  transaction: 'yapepay_transactions',
+};
+
 interface ServicesStackProps extends cdk.StackProps {
   config: EnvironmentConfig;
   vpc: ec2.IVpc;
   qrHandlerFunction: lambda.IFunction;
+  userPool: cognito.IUserPool;
+  userPoolClientId: string;
+  dbSecret: secretsmanager.ISecret;
+  dbSecurityGroup: ec2.SecurityGroup;
+  dbEndpoint: string;
+  dbPort: string;
 }
 
 export class ServicesStack extends cdk.Stack {
@@ -61,6 +76,20 @@ export class ServicesStack extends cdk.Stack {
       ],
     });
 
+    // Task role: used by application code to call AWS APIs (Cognito Admin)
+    const taskRole = new iam.Role(this, 'TaskRole', {
+      roleName: `${prefix}-ecs-task-role`,
+      assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+    });
+    taskRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        'cognito-idp:AdminCreateUser',
+        'cognito-idp:AdminSetUserPassword',
+        'cognito-idp:AdminAddUserToGroup',
+      ],
+      resources: [props.userPool.userPoolArn],
+    }));
+
     // ALB: accepts public HTTP traffic
     const albSg = new ec2.SecurityGroup(this, 'AlbSg', {
       vpc: props.vpc,
@@ -76,6 +105,12 @@ export class ServicesStack extends cdk.Stack {
       allowAllOutbound: true,
     });
     taskSg.addIngressRule(albSg, ec2.Port.tcp(CONTAINER_PORT));
+
+    // Allow tasks to reach RDS on port 5432
+    props.dbSecurityGroup.addIngressRule(taskSg, ec2.Port.tcp(5432));
+
+    // Execution role must be able to pull the DB secret at task startup
+    props.dbSecret.grantRead(this.taskExecutionRole);
 
     this.alb = new elbv2.ApplicationLoadBalancer(this, 'Alb', {
       loadBalancerName: `${prefix}-alb`,
@@ -140,6 +175,7 @@ export class ServicesStack extends cdk.Stack {
         cpu: 256,
         memoryLimitMiB: 512,
         executionRole: this.taskExecutionRole,
+        taskRole,
       });
 
       taskDef.addContainer(`${svc}-container`, {
@@ -154,6 +190,20 @@ export class ServicesStack extends cdk.Stack {
         environment: {
           PORT: String(CONTAINER_PORT),
           NODE_ENV: config.envName,
+          COGNITO_USER_POOL_ID: props.userPool.userPoolId,
+          COGNITO_CLIENT_ID: props.userPoolClientId,
+          DB_HOST: props.dbEndpoint,
+          DB_PORT: props.dbPort,
+          DB_NAME: SERVICE_DB_NAMES[svc],
+          // user-service calls wallet-service through the ALB after registration
+          ...(svc === 'user' && {
+            WALLET_SERVICE_URL: `http://${this.alb.loadBalancerDnsName}`,
+          }),
+        },
+        secrets: {
+          // DB credentials pulled from Secrets Manager at task startup
+          DB_USER:     ecs.Secret.fromSecretsManager(props.dbSecret, 'username'),
+          DB_PASSWORD: ecs.Secret.fromSecretsManager(props.dbSecret, 'password'),
         },
       });
 
