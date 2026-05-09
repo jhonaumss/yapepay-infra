@@ -24,12 +24,17 @@ export class DatabaseStack extends cdk.Stack {
     const { config } = props;
     const prefix = `${config.projectName}-${config.envName}`;
 
-    // Security group with no inbound rules — ServicesStack adds the task SG rule
     this.dbSecurityGroup = new ec2.SecurityGroup(this, 'DbSg', {
       vpc: props.vpc,
       description: `${prefix} RDS PostgreSQL`,
       allowAllOutbound: false,
     });
+    // Allow any resource within the VPC to reach Postgres — avoids a cross-stack
+    // SG reference that would create a dependency cycle with ServicesStack.
+    this.dbSecurityGroup.addIngressRule(
+      ec2.Peer.ipv4(props.vpc.vpcCidrBlock),
+      ec2.Port.tcp(5432),
+    );
 
     const instance = new rds.DatabaseInstance(this, 'Database', {
       engine: rds.DatabaseInstanceEngine.postgres({
