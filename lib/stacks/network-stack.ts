@@ -20,7 +20,8 @@ export class NetworkStack extends cdk.Stack {
     // When enableCostlyResources is true, adds private subnets + 1 NAT Gateway.
     this.vpc = new ec2.Vpc(this, 'Vpc', {
       vpcName: `${prefix}-vpc`,
-      maxAzs: 2,
+      // Explicit AZs avoid a context lookup (API call) during cdk synth.
+      availabilityZones: [`${this.region}a`, `${this.region}b`],
       natGateways: config.features.enableCostlyResources ? 1 : 0,
       subnetConfiguration: [
         {
