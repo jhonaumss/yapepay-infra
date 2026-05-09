@@ -29,7 +29,7 @@ jobs:
 
       - name: CDK synth (dry run)
         env:
-          CDK_DEFAULT_ACCOUNT: '000000000000'
+          CDK_DEFAULT_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
           CDK_DEFAULT_REGION: us-east-1
         run: npx cdk synth
 
