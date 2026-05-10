@@ -514,7 +514,7 @@ test('cdk.App sintetiza los stacks MVP implementados desde pruebas', () => {
   });
 
   const assembly = app.synth();
-  expect(assembly.stacks.length).toBe(6);
+  expect(assembly.stacks.length).toBe(7);
 });
 
 function synthSecurityTemplate(): Template {
