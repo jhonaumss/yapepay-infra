@@ -1,219 +1,224 @@
 # yapepay-infra
 
-Infraestructura como código para el MVP de **YapePay**, implementada con
-**AWS CDK v2** y **TypeScript**.
+Infraestructura como código para **YapePay**, implementada con **AWS CDK v2** y **TypeScript**.
 
-El repositorio define la base cloud inicial para generación de QR, mensajería
-asíncrona, almacenamiento seguro, observabilidad y validación HTTP manual. El
-ambiente objetivo actual es `dev` en `us-east-1`.
+Define y despliega toda la infraestructura cloud del ambiente `dev` en `us-east-1`: red, base de datos, autenticación, cómputo (Fargate + Lambda), mensajería, observabilidad y CI/CD.
 
-## Estado
+---
 
-Versión MVP lista para primer deploy controlado.
+## Ambiente desplegado
 
-- Cuenta AWS objetivo: `628884045138`
-- Región: `us-east-1`
-- Perfil AWS CLI: `yapepay`
-- Bootstrap CDK: ya ejecutado previamente
-- MFA root: verificado
-- Budget mensual: `yapepay-dev-monthly-budget`, USD 20, alertas 50/80/100
-- Deploy automático: no configurado
+| Parámetro | Valor |
+|-----------|-------|
+| Cuenta AWS | `628884045138` |
+| Región | `us-east-1` |
+| Ambiente | `dev` |
+| ALB (punto de entrada) | `yapepay-dev-alb-717626426.us-east-1.elb.amazonaws.com` |
+| Budget mensual | USD 20 (alertas 50 / 80 / 100 %) |
 
-Antes de desplegar, revisar siempre el diff y ejecutar el script de readiness.
+---
 
-## Arquitectura MVP
+## Arquitectura
 
-| Stack | Estado | Responsabilidad |
-|---|---:|---|
-| `YapepayDevSecurityStack` | Listo | KMS CMK compartida con rotación y alias `alias/yapepay/dev`. |
-| `YapepayDevStorageStack` | Listo | Buckets S3 para documentos KYC y comprobantes PDF. |
-| `YapepayDevMessagingStack` | Listo | Colas SQS para eventos de transacción, notificaciones y DLQs. |
-| `YapepayDevServerlessStack` | Listo | Lambdas Node.js 22 para QR y notificaciones. |
-| `YapepayDevApiStack` | Listo | HTTP API v2 con `POST /v1/qr`. |
-| `YapepayDevObservabilityStack` | Listo | Dashboard, alarmas CloudWatch y SNS topic de alarmas. |
+```
+Internet
+  │
+  ▼
+Application Load Balancer  (yapepay-dev-alb)
+  ├─ /v1/usuarios*      → ECS Fargate: user-service
+  ├─ /v1/billeteras*    → ECS Fargate: wallet-service
+  ├─ /v1/recargas*      → ECS Fargate: wallet-service
+  ├─ /v1/transacciones* → ECS Fargate: transaction-service
+  └─ /v1/qr*            → Lambda: qr-handler (ARM64, Node.js 22)
 
-Stacks posteriores como `Network`, `Database`, `Cache`, `Services`, `Auth`,
-`Edge`, `Audit` y `Pipeline` existen como base de proyecto, pero no se
-instancian en esta versión MVP.
+ECS Fargate (yapepay-dev-cluster):
+  user-service · wallet-service · transaction-service
+  ↕ VPC pública, credenciales DB desde Secrets Manager
+
+Lambda (VPC pública, VPC Endpoints para API calls sin internet):
+  qr-handler           ← ALB target
+  notification-handler ← SQS trigger (notificationsQueue)
+
+RDS PostgreSQL (instancia compartida):
+  yapepay_users · yapepay_wallets · yapepay_transactions · yapepay_qr
+
+AWS Cognito:
+  User Pool → emite JWT para autenticación de usuarios
+  App Client → usado por user-service y qr-service
+
+AWS SQS:
+  notificationsQueue (Standard) → trigger del notification-handler Lambda
+  transactionEventsQueue (FIFO) → reservado
+
+VPC Endpoints (permiten a Lambda en subred pública llamar APIs AWS):
+  com.amazonaws.us-east-1.secretsmanager
+  com.amazonaws.us-east-1.cognito-idp
+
+ECR: un repositorio por servicio Fargate
+  yapepay-dev-user-service
+  yapepay-dev-wallet-service
+  yapepay-dev-transaction-service
+```
+
+---
+
+## Stacks CDK
+
+| Stack | Responsabilidad |
+|-------|----------------|
+| `YapepayDevNetworkStack` | VPC, subredes públicas (2 AZs), VPC Endpoints para Secrets Manager y Cognito |
+| `YapepayDevSecurityStack` | KMS CMK compartida con rotación, alias `alias/yapepay/dev` |
+| `YapepayDevStorageStack` | Buckets S3 para documentos KYC y comprobantes PDF |
+| `YapepayDevDatabaseStack` | RDS PostgreSQL, secret en Secrets Manager, security group |
+| `YapepayDevAuthStack` | Cognito User Pool, App Client, grupos de usuarios |
+| `YapepayDevMessagingStack` | SQS notificationsQueue (Standard) + transactionEventsQueue (FIFO) + DLQs |
+| `YapepayDevServerlessStack` | Lambda qr-handler (ALB target) + notification-handler (SQS trigger) en VPC |
+| `YapepayDevServicesStack` | ECS Cluster, ECR repos, ALB, Fargate services, task definitions, IAM roles |
+| `YapepayDevObservabilityStack` | Dashboard y alarmas CloudWatch, SNS topic de alertas |
+
+---
 
 ## Recursos principales
 
-- S3:
-  - Bucket KYC.
-  - Bucket de comprobantes PDF.
-  - Bloqueo público total, versioning, SSE-KMS, bucket keys y `enforceSSL`.
-- SQS:
-  - Cola FIFO de eventos de transacción.
-  - Cola Standard de notificaciones.
-  - DLQs dedicadas.
-  - Cifrado SSE-KMS y políticas que fuerzan transporte seguro.
-- Lambda:
-  - `qr-handler`.
-  - `notification-handler`.
-  - Runtime Node.js 22, arquitectura ARM64 y logs con retención acotada en dev.
-- API Gateway:
-  - HTTP API v2.
-  - Ruta `POST /v1/qr`.
-  - CORS y throttling básicos para dev.
-- Observabilidad:
-  - Dashboard CloudWatch.
-  - Alarmas de API, Lambdas y DLQs.
-  - SNS topic sin suscriptores por defecto.
+### Red
+- VPC con 2 subredes públicas (us-east-1a, us-east-1b)
+- Sin NAT Gateway (ambiente dev — costo cero)
+- VPC Interface Endpoints: Secrets Manager y Cognito (permiten acceso desde Lambda sin IP pública)
 
-## Requisitos
+### Cómputo
+- **ECS Fargate:** cluster `yapepay-dev-cluster`, 3 servicios (256 CPU / 512 MB cada uno), despliegue con `--force-new-deployment` desde CI/CD
+- **Lambda qr-handler:** ARM64, 128 MB, timeout 10s, en VPC, con `ACTIVE` X-Ray tracing
+- **Lambda notification-handler:** ARM64, 128 MB, timeout 30s, trigger SQS batch 10
 
-- Node.js 22 LTS o superior.
-- npm 10 o superior.
-- AWS CLI v2.
-- AWS CDK CLI 2.1119.
-- Perfil AWS CLI `yapepay`.
-- Git.
+### Enrutamiento
+- ALB único con listener HTTP 80
+- Reglas path-based: prioridades 10 (user) / 20 (wallet) / 30 (transaction) / 40 (qr Lambda)
+- Default: 404 JSON para rutas no reconocidas
 
-Verificación local:
+### Base de datos
+- RDS PostgreSQL, instancia compartida, TLS habilitado
+- Credenciales en Secrets Manager (`DB_USER` y `DB_PASSWORD`)
+- Cada servicio crea su propia base de datos en el arranque (bootstrap migration)
 
-```bash
-chmod +x scripts/*.sh
-./scripts/check-prerequisites.sh
-```
+### Autenticación
+- Cognito User Pool con grupos de usuarios
+- JWT access tokens verificados por `authMiddleware` en cada servicio
+- user-service llama a Cognito Admin API para crear usuarios (task role con permisos `AdminCreateUser`, `AdminSetUserPassword`, `AdminAddUserToGroup`)
 
-## Instalación
+### Mensajería
+- `notificationsQueue` (Standard): recibe eventos `TRANSACTION_COMPLETED` del transaction-service; dispara `notification-handler` Lambda
+- `transactionEventsQueue` (FIFO): reservado para uso futuro
+- DLQs con retención 14 días para ambas colas
 
-```bash
-npm install
-npm run build
-npm test
-```
+---
 
-## Comandos de trabajo
+## CI/CD
 
-```bash
-npm run build                      # compila TypeScript
-npm test                           # ejecuta Jest
-./scripts/check-prerequisites.sh   # verifica herramientas locales
-./scripts/check-deploy-readiness.sh # verifica cuenta, MFA root y Budget
-./scripts/synth.sh                 # build + cdk synth
-./scripts/diff.sh                  # build + cdk diff
-```
+El despliegue es completamente automático al hacer push a `main` en ambos repositorios.
 
-## Deploy controlado
+**Pipeline en `yapepay-infra`** (`.github/workflows/ci.yml`):
 
-No hay deploy automático. El primer despliegue debe ser manual y revisado.
+| Job | Trigger | Pasos |
+|-----|---------|-------|
+| `build` | PR a main + push a main | checkout → Node 22 → `npm ci` → `tsc` → tests → AWS credentials → `cdk synth` |
+| `deploy` | Push a main (tras build exitoso) | checkout → Node 22 → `npm ci` → `tsc` → AWS credentials → `cdk bootstrap` → `cdk deploy --all` |
 
-Flujo recomendado:
+**Pipeline en `yapepay-services`** (`.github/workflows/cd.yml`):
 
-```bash
-export AWS_PROFILE=yapepay
+Construye y despliega cada servicio modificado:
+1. Build imagen Docker → push a ECR (`:<sha>` y `:latest`)
+2. `ecs update-service --force-new-deployment` (Fargate services)
+3. Para qr-service (Lambda): `tsc` → zip → `lambda update-function-code`
 
-./scripts/check-deploy-readiness.sh
-./scripts/diff.sh
-./scripts/deploy-dev.sh
-```
+**Secretos requeridos en GitHub:**
 
-`deploy-dev.sh` pide una confirmación literal antes de ejecutar
-`cdk deploy --all`. No ejecutar deploy si el readiness falla o si el diff no
-fue revisado.
+| Secret | Descripción |
+|--------|-------------|
+| `AWS_ACCESS_KEY_ID` | Credenciales IAM para CI/CD |
+| `AWS_SECRET_ACCESS_KEY` | Credenciales IAM para CI/CD |
+| `AWS_ACCOUNT_ID` | ID de cuenta AWS (`628884045138`) |
 
-Para destruir el ambiente dev, usar solamente con intención explícita:
+---
+
+## Requisitos locales
+
+- Node.js 22 LTS
+- npm 10+
+- AWS CLI v2
+- AWS CDK CLI 2.x (`npm install -g aws-cdk`)
+- Perfil AWS CLI configurado
+
+---
+
+## Comandos
 
 ```bash
-./scripts/destroy-dev.sh
+npm install          # instalar dependencias
+npm run build        # compilar TypeScript
+npm test             # ejecutar tests CDK (Jest)
+npx cdk synth        # sintetizar CloudFormation (requiere credenciales AWS)
+npx cdk diff         # ver cambios pendientes vs. stack desplegado
 ```
 
-## Validación HTTP
+> No ejecutar `cdk deploy` localmente. Todo despliegue va por GitHub CI/CD.
 
-Después del deploy, obtener el output `HttpApiUrl`:
-
-```bash
-export YAPEPAY_API_BASE_URL="$(
-  aws cloudformation describe-stacks \
-    --stack-name YapepayDevApiStack \
-    --query "Stacks[0].Outputs[?OutputKey=='HttpApiUrl'].OutputValue | [0]" \
-    --output text \
-    --profile yapepay
-)"
-```
-
-Probar con `curl`:
-
-```bash
-./api-examples/curl/post-v1-qr-valid.sh
-./api-examples/curl/post-v1-qr-open.sh
-./api-examples/curl/post-v1-qr-invalid.sh
-```
-
-También se incluye una colección Postman:
-
-```text
-api-examples/postman/yapepay-mvp.postman_collection.json
-```
-
-Al importarla, actualizar la variable `baseUrl` con el valor de `HttpApiUrl`.
-
-## Estructura
-
-```text
-yapepay-infra/
-├── api-examples/
-│   ├── curl/
-│   └── postman/
-├── bin/
-│   └── yapepay-infra.ts
-├── lambda/
-│   ├── notification-handler/
-│   └── qr-handler/
-├── lib/
-│   ├── config/
-│   ├── constructs/
-│   └── stacks/
-├── scripts/
-├── test/
-├── cdk.json
-├── package.json
-├── tsconfig.json
-└── README.md
-```
+---
 
 ## Testing
 
-La suite actual cubre:
-
-- Assertions CDK de los stacks MVP.
-- Contrato local de handlers Lambda.
-- Contrato HTTP local para `POST /v1/qr`.
-
-Ejecutar:
+La suite de tests CDK verifica:
+- Presencia de recursos clave en cada stack (VPC, RDS, Cognito, ALB, Lambda, SQS, ECS)
+- Configuración correcta de variables de entorno en las task definitions
+- Rutas del ALB y prioridades
+- Permisos IAM
 
 ```bash
 npm test
 ```
 
+---
+
 ## Seguridad y costos
 
-- No versionar credenciales, archivos `.env`, claves CSV ni secretos.
-- `.docs/` es documentación local-only y no se versiona.
-- `cdk.out` no se versiona.
-- KMS CMK compartida con rotación habilitada.
-- S3 bloquea acceso público y fuerza SSL.
-- SQS fuerza SSL y usa SSE-KMS.
-- Logs y retenciones están acotados para dev.
-- Budget mensual configurado antes del primer deploy.
-- No se usan NAT Gateways, RDS, Redis, ECS, WAF ni CloudFront en esta versión.
+- Sin NAT Gateway ni ElastiCache en dev (ahorro de ~$90/mes)
+- VPC Endpoints en lugar de NAT para acceso a APIs AWS desde Lambda
+- RDS instancia mínima, multi-AZ desactivado en dev
+- Lambda: desiredCount 0 para Fargate en deploy inicial (sin imagen en ECR aún)
+- Budget USD 20/mes con alertas configuradas
+- Secrets Manager para credenciales de DB (nunca en variables de entorno en texto plano)
+- KMS CMK con rotación automática
 
-## Documentación local
+---
 
-La documentación extendida, bitácoras y checklist viven en `.docs/` y quedan
-fuera de Git por diseño.
+## Estructura
 
-Archivos locales principales:
-
-- `.docs/plan_implementacion_cdk_yapepay.md`
-- `.docs/reviewer/checklist_avance_vs_plan.md`
-- `.docs/architecture.md`
-- `.docs/deployment.md`
-- `.docs/cost-control.md`
-
-## Próximo paso
-
-Ejecutar un deploy controlado del MVP cuando se apruebe explícitamente el diff.
-Después del deploy, validar `POST /v1/qr` con los scripts `curl` y la colección
-Postman incluida.
+```
+yapepay-infra/
+├── bin/
+│   └── yapepay-infra.ts        # entry point CDK app
+├── lambda/
+│   ├── qr-handler/             # código Lambda QR (zip asset)
+│   └── notification-handler/   # código Lambda notificaciones (zip asset)
+├── lib/
+│   ├── config/
+│   │   └── environment.ts      # EnvironmentConfig (dev / prod)
+│   ├── constructs/             # constructs reutilizables
+│   └── stacks/
+│       ├── network-stack.ts
+│       ├── security-stack.ts
+│       ├── storage-stack.ts
+│       ├── database-stack.ts
+│       ├── auth-stack.ts
+│       ├── messaging-stack.ts
+│       ├── serverless-stack.ts
+│       ├── services-stack.ts
+│       └── observability-stack.ts
+├── test/
+│   └── yapepay-infra.test.ts
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+├── cdk.json
+├── package.json
+└── tsconfig.json
+```
