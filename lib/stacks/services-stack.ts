@@ -9,6 +9,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
 import { Construct } from 'constructs';
 
 import { EnvironmentConfig } from '../config/environment.js';
@@ -45,6 +46,7 @@ interface ServicesStackProps extends cdk.StackProps {
   dbSecret: secretsmanager.ISecret;
   dbEndpoint: string;
   dbPort: string;
+  notificationsQueue: sqs.IQueue;
 }
 
 export class ServicesStack extends cdk.Stack {
@@ -97,6 +99,7 @@ export class ServicesStack extends cdk.Stack {
       ],
       resources: ['*'],
     }));
+    props.notificationsQueue.grantSendMessages(taskRole);
 
     // ALB: accepts public HTTP traffic
     const albSg = new ec2.SecurityGroup(this, 'AlbSg', {
@@ -208,6 +211,7 @@ export class ServicesStack extends cdk.Stack {
           ...(svc === 'transaction' && {
             USER_SERVICE_URL:   `http://${this.alb.loadBalancerDnsName}`,
             WALLET_SERVICE_URL: `http://${this.alb.loadBalancerDnsName}`,
+            SQS_QUEUE_URL:      props.notificationsQueue.queueUrl,
           }),
         },
         secrets: {
