@@ -209,6 +209,10 @@ export class ServicesStack extends cdk.Stack {
           ...(svc === 'user' && {
             WALLET_SERVICE_URL: `http://${this.alb.loadBalancerDnsName}`,
           }),
+          // wallet-service resolves phone → userId via user-service for recargas
+          ...(svc === 'wallet' && {
+            USER_SERVICE_URL: `http://${this.alb.loadBalancerDnsName}`,
+          }),
           ...(svc === 'transaction' && {
             USER_SERVICE_URL:   `http://${this.alb.loadBalancerDnsName}`,
             WALLET_SERVICE_URL: `http://${this.alb.loadBalancerDnsName}`,
