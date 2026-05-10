@@ -191,6 +191,7 @@ export class ServicesStack extends cdk.Stack {
           DB_HOST: props.dbEndpoint,
           DB_PORT: props.dbPort,
           DB_NAME: SERVICE_DB_NAMES[svc],
+          DB_SSL: 'true',
           // user-service calls wallet-service through the ALB after registration
           ...(svc === 'user' && {
             WALLET_SERVICE_URL: `http://${this.alb.loadBalancerDnsName}`,
