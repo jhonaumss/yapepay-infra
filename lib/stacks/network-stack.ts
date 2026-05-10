@@ -55,6 +55,8 @@ export class NetworkStack extends cdk.Stack {
       service: new ec2.InterfaceVpcEndpointService(`com.amazonaws.${this.region}.cognito-idp`),
       privateDnsEnabled: true,
       subnets: { subnetType: ec2.SubnetType.PUBLIC },
+      // cognito-idp does not support all AZs; filter to supported ones at synth time.
+      lookupSupportedAzs: true,
     });
 
     new cdk.CfnOutput(this, 'VpcId', {
