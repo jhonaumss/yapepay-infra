@@ -211,6 +211,7 @@ export class ServicesStack extends cdk.Stack {
           ...(svc === 'transaction' && {
             USER_SERVICE_URL:   `http://${this.alb.loadBalancerDnsName}`,
             WALLET_SERVICE_URL: `http://${this.alb.loadBalancerDnsName}`,
+            QR_SERVICE_URL:     `http://${this.alb.loadBalancerDnsName}`,
             SQS_QUEUE_URL:      props.notificationsQueue.queueUrl,
           }),
         },
