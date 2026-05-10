@@ -9,6 +9,7 @@ export const stagingConfig: EnvironmentConfig = {
   envName: 'staging',
   region: DEFAULT_REGION,
   removalPolicyDestroy: false,
+  internalApiKey: process.env.INTERNAL_API_KEY ?? '',
   features: {
     enableCostlyResources: false,
     enableSecurityHardening: true,
