@@ -38,11 +38,16 @@ export class AuthStack extends cdk.Stack {
         : cdk.RemovalPolicy.RETAIN,
     });
 
-    // "user" group — assigned to all registered users via Admin API
-    new cognito.CfnUserPoolGroup(this, 'UserGroup', {
+    new cognito.CfnUserPoolGroup(this, 'RegularUserGroup', {
       userPoolId: this.userPool.userPoolId,
-      groupName: 'user',
-      description: 'Default group for all registered users',
+      groupName: 'regular_user',
+      description: 'Standard users: access to all endpoints except recargas',
+    });
+
+    new cognito.CfnUserPoolGroup(this, 'CashierUserGroup', {
+      userPoolId: this.userPool.userPoolId,
+      groupName: 'cashier_user',
+      description: 'Cashier users: exclusive access to the recargas endpoint',
     });
 
     this.userPoolClient = this.userPool.addClient('ApiClient', {

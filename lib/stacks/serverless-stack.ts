@@ -61,6 +61,7 @@ export class ServerlessStack extends cdk.Stack {
         DB_SECRET_ARN: props.dbSecret.secretArn,
         COGNITO_USER_POOL_ID: props.userPool.userPoolId,
         COGNITO_CLIENT_ID: props.userPoolClientId,
+        INTERNAL_API_KEY: props.config.internalApiKey,
       },
       functionName: this.buildFunctionName(props.config, 'qr-handler'),
       handler: 'lambda.handler',
