@@ -41,6 +41,22 @@ export class NetworkStack extends cdk.Stack {
       ],
     });
 
+    // Interface VPC Endpoints — allow Lambda in public subnets to call AWS APIs
+    // without internet access (Lambda ENIs in VPC do not receive public IPs).
+    new ec2.InterfaceVpcEndpoint(this, 'SecretsManagerEndpoint', {
+      vpc: this.vpc,
+      service: ec2.InterfaceVpcEndpointAwsService.SECRETS_MANAGER,
+      privateDnsEnabled: true,
+      subnets: { subnetType: ec2.SubnetType.PUBLIC },
+    });
+
+    new ec2.InterfaceVpcEndpoint(this, 'CognitoUserPoolsEndpoint', {
+      vpc: this.vpc,
+      service: new ec2.InterfaceVpcEndpointService(`com.amazonaws.${this.region}.cognito-idp`),
+      privateDnsEnabled: true,
+      subnets: { subnetType: ec2.SubnetType.PUBLIC },
+    });
+
     new cdk.CfnOutput(this, 'VpcId', {
       value: this.vpc.vpcId,
       exportName: `${prefix}-vpc-id`,

@@ -56,11 +56,24 @@ const messagingStack = new MessagingStack(app, 'YapepayDevMessagingStack', {
   env,
 });
 
+// ── Database (RDS PostgreSQL) ─────────────────────────────────────────────────
+const databaseStack = new DatabaseStack(app, 'YapepayDevDatabaseStack', {
+  config: devConfig,
+  env,
+  vpc: networkStack.vpc,
+});
+
 // ── Serverless (Lambda) ───────────────────────────────────────────────────────
 const serverlessStack = new ServerlessStack(app, 'YapepayDevServerlessStack', {
   config: devConfig,
   env,
   notificationsQueue: messagingStack.notificationsQueue,
+  vpc: networkStack.vpc,
+  dbSecret: databaseStack.dbSecret,
+  dbEndpoint: databaseStack.dbEndpoint,
+  dbPort: databaseStack.dbPort,
+  userPool: authStack.userPool,
+  userPoolClientId: authStack.userPoolClient.userPoolClientId,
 });
 
 // ── API Gateway ───────────────────────────────────────────────────────────────
@@ -81,13 +94,6 @@ new ObservabilityStack(app, 'YapepayDevObservabilityStack', {
   qrHandlerFunction: serverlessStack.qrHandlerFunction,
   transactionEventsDlq: messagingStack.transactionEventsDlq,
   transactionEventsQueue: messagingStack.transactionEventsQueue,
-});
-
-// ── Database (RDS PostgreSQL) ─────────────────────────────────────────────────
-const databaseStack = new DatabaseStack(app, 'YapepayDevDatabaseStack', {
-  config: devConfig,
-  env,
-  vpc: networkStack.vpc,
 });
 
 // ── Container Services (ECS Fargate + Lambda via ALB) ────────────────────────
