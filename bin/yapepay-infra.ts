@@ -101,6 +101,7 @@ new ServicesStack(app, 'YapepayDevServicesStack', {
   dbSecret: databaseStack.dbSecret,
   dbEndpoint: databaseStack.dbEndpoint,
   dbPort: databaseStack.dbPort,
+  notificationsQueue: messagingStack.notificationsQueue,
 });
 
 app.synth();
