@@ -1,4 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
+import * as cognito from 'aws-cdk-lib/aws-cognito';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 
 import { devConfig } from '../lib/config/dev.js';
@@ -8,6 +11,24 @@ import { ObservabilityStack } from '../lib/stacks/observability-stack.js';
 import { SecurityStack } from '../lib/stacks/security-stack.js';
 import { ServerlessStack } from '../lib/stacks/serverless-stack.js';
 import { StorageStack } from '../lib/stacks/storage-stack.js';
+
+const TEST_ENV = { account: '123456789012', region: devConfig.region };
+
+function addServerlessDeps(app: cdk.App) {
+  const s = new cdk.Stack(app, 'TestServerlessDeps', { env: TEST_ENV });
+  const vpc = new ec2.Vpc(s, 'Vpc', { maxAzs: 1, natGateways: 0 });
+  const dbSecret = new secretsmanager.Secret(s, 'DbSecret');
+  const userPool = new cognito.UserPool(s, 'UserPool');
+  const userPoolClient = userPool.addClient('Client');
+  return {
+    vpc,
+    dbSecret,
+    dbEndpoint: 'test-rds.us-east-1.rds.amazonaws.com',
+    dbPort: '5432',
+    userPool,
+    userPoolClientId: userPoolClient.userPoolClientId,
+  };
+}
 
 /**
  * Smoke test: garantiza que la configuración base se carga. Se irán agregando
@@ -467,6 +488,7 @@ test('cdk.App sintetiza los stacks MVP implementados desde pruebas', () => {
       region: devConfig.region,
     },
     notificationsQueue: messagingStack.notificationsQueue,
+    ...addServerlessDeps(app),
   });
   const apiStack = new ApiStack(app, 'TestApiStack', {
     config: devConfig,
@@ -560,6 +582,7 @@ function synthServerlessTemplate(): Template {
       region: devConfig.region,
     },
     notificationsQueue: messagingStack.notificationsQueue,
+    ...addServerlessDeps(app),
   });
 
   return Template.fromStack(stack);
@@ -583,6 +606,7 @@ function synthApiTemplate(): Template {
       region: devConfig.region,
     },
     notificationsQueue: messagingStack.notificationsQueue,
+    ...addServerlessDeps(app),
   });
   const stack = new ApiStack(app, 'TestApiStack', {
     config: devConfig,
@@ -614,6 +638,7 @@ function synthObservabilityTemplate(): Template {
       region: devConfig.region,
     },
     notificationsQueue: messagingStack.notificationsQueue,
+    ...addServerlessDeps(app),
   });
   const apiStack = new ApiStack(app, 'TestApiStack', {
     config: devConfig,
