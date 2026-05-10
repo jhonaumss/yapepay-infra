@@ -10,6 +10,7 @@ export const devConfig: EnvironmentConfig = {
   region: DEFAULT_REGION,
   // account se toma de CDK_DEFAULT_ACCOUNT en el entrypoint si no se define.
   removalPolicyDestroy: true,
+  internalApiKey: 'yp-internal-dev-k9x2m7q4n1r8',
   features: {
     enableCostlyResources: false,
     enableSecurityHardening: false,

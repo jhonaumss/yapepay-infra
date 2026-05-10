@@ -43,6 +43,8 @@ export interface EnvironmentConfig {
   readonly features: FeatureFlags;
   /** Tags globales que se aplican a todos los stacks. */
   readonly tags: Record<string, string>;
+  /** Shared secret for service-to-service internal calls (X-Internal-Key header). */
+  readonly internalApiKey: string;
 }
 
 export const DEFAULT_REGION = 'us-east-1';
