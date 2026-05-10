@@ -9,6 +9,7 @@ export const prodConfig: EnvironmentConfig = {
   envName: 'prod',
   region: DEFAULT_REGION,
   removalPolicyDestroy: false,
+  internalApiKey: process.env.INTERNAL_API_KEY ?? '',
   features: {
     enableCostlyResources: true,
     enableSecurityHardening: true,
