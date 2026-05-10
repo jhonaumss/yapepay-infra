@@ -88,6 +88,15 @@ export class ServicesStack extends cdk.Stack {
       ],
       resources: [props.userPool.userPoolArn],
     }));
+    taskRole.addToPolicy(new iam.PolicyStatement({
+      actions: [
+        'ssmmessages:CreateControlChannel',
+        'ssmmessages:CreateDataChannel',
+        'ssmmessages:OpenControlChannel',
+        'ssmmessages:OpenDataChannel',
+      ],
+      resources: ['*'],
+    }));
 
     // ALB: accepts public HTTP traffic
     const albSg = new ec2.SecurityGroup(this, 'AlbSg', {
@@ -196,6 +205,10 @@ export class ServicesStack extends cdk.Stack {
           ...(svc === 'user' && {
             WALLET_SERVICE_URL: `http://${this.alb.loadBalancerDnsName}`,
           }),
+          ...(svc === 'transaction' && {
+            USER_SERVICE_URL:   `http://${this.alb.loadBalancerDnsName}`,
+            WALLET_SERVICE_URL: `http://${this.alb.loadBalancerDnsName}`,
+          }),
         },
         secrets: {
           // DB credentials pulled from Secrets Manager at task startup
@@ -216,6 +229,7 @@ export class ServicesStack extends cdk.Stack {
         vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
         deploymentController: { type: ecs.DeploymentControllerType.ECS },
         circuitBreaker: { enable: true, rollback: false },
+        enableExecuteCommand: true,
       });
 
       // Wire the service into the ALB listener with path-based routing
